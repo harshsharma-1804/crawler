@@ -1,0 +1,650 @@
+{% extends "layout.html" %}
+
+{% block title %}Start New Crawl - V3 Crawler{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2>Start New Crawl</h2>
+    
+    <!-- Parallel Job Capacity Indicator -->
+    <div id="capacity-bar" class="capacity-bar" style="margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px; background: #f0f9ff; border: 1px solid #bae6fd; display: flex; align-items: center; gap: 0.75rem; font-size: 0.9rem;">
+        <span style="font-weight: 600; color: #0369a1;">Crawl Slots:</span>
+        <span id="capacity-slots" style="display: inline-flex; gap: 4px;">
+            {% for i in range(capacity.max) %}
+            <span style="display: inline-block; width: 14px; height: 14px; border-radius: 3px; background: {{ '#22c55e' if i < capacity.running else '#e2e8f0' }}; border: 1px solid {{ '#16a34a' if i < capacity.running else '#cbd5e1' }};"></span>
+            {% endfor %}
+        </span>
+        <span id="capacity-text" style="color: #475569;">
+            {{ capacity.running }}/{{ capacity.max }} in use{% if capacity.running_domains %} ({{ capacity.running_domains | join(', ') }}){% endif %}
+        </span>
+        {% if capacity.available == 0 %}
+        <span style="color: #dc2626; font-weight: 500; margin-left: auto;">All slots full</span>
+        {% endif %}
+    </div>
+
+    {% if message %}
+    <div class="alert alert-success">{{ message }}</div>
+    {% endif %}
+    
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <form action="/start" method="post" class="crawl-form">
+        <fieldset>
+            <legend>Basic Settings</legend>
+            
+            <div class="form-group">
+                <label for="domain">Domain *</label>
+                <input type="text" id="domain" name="domain" placeholder="example.com" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="project_name">Project Name (Optional)</label>
+                <input type="text" id="project_name" name="project_name" placeholder="my-crawl-project">
+                <small style="color:#64748b; margin-top:4px; display:block;">
+                    Creates isolated folder for this crawl. Defaults to domain if empty.
+                </small>
+            </div>
+            
+            <div class="form-group" id="entry_url_group">
+                <label for="entry_url">Entry URL</label>
+                <input type="url" id="entry_url" name="entry_url" placeholder="https://example.com">
+                <small id="entry_url_hint" style="display:none; color:#64748b; margin-top:4px;">
+                    Not used in SITEMAP_ONLY mode — URLs come from sitemap
+                </small>
+            </div>
+            
+            <div class="form-row" id="depth_pages_row">
+                <div class="form-group">
+                    <label for="max_depth">Max Depth</label>
+                    <input type="number" id="max_depth" name="max_depth" value="3" min="0" max="10">
+                </div>
+                
+                <div class="form-group">
+                    <label for="max_pages">Max Pages</label>
+                    <input type="number" id="max_pages" name="max_pages" placeholder="unlimited" min="1">
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="concurrent_requests">Concurrent Requests</label>
+                    <input type="number" id="concurrent_requests" name="concurrent_requests" value="20" min="1" max="100">
+                </div>
+                
+                <div class="form-group">
+                    <label for="rate_limit_per_domain">Rate Limit/sec</label>
+                    <input type="number" id="rate_limit_per_domain" name="rate_limit_per_domain" value="10" min="1">
+                </div>
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Domain & External Sites</legend>
+            
+            <div class="form-group checkbox">
+                <label>
+                    <input type="checkbox" name="allow_subdomains" checked>
+                    Allow Subdomains
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label for="allowed_external_sites">Allowed External Sites (comma-separated)</label>
+                <input type="text" id="allowed_external_sites" name="allowed_external_sites" placeholder="cdn.example.com, api.example.com">
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>URL Patterns</legend>
+            
+            <div class="form-group">
+                <label for="exclude_patterns">Exclude Patterns (comma-separated)</label>
+                <input type="text" id="exclude_patterns" name="exclude_patterns" placeholder=".pdf, .zip, /admin/">
+            </div>
+            
+            <div class="form-group">
+                <label for="include_patterns" id="include_patterns_label">Include Patterns (comma-separated)</label>
+                <input type="text" id="include_patterns" name="include_patterns" placeholder="/blog/, /products/">
+                <small id="include_patterns_hint" style="display:none; color:#e67e22; font-weight:600; margin-top:4px; display:none;">
+                    ⚠ Pattern Crawl mode: enter the URL paths to crawl, e.g. <code>/careers, /newsletter/something</code>.
+                    Only pages whose path starts with one of these values will be crawled.
+                </small>
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Crawl Mode &amp; Save Options</legend>
+            
+            <div class="form-group">
+                <label for="crawl_mode">Crawl Mode</label>
+                <select id="crawl_mode" name="crawl_mode" onchange="onCrawlModeChange(this.value)">
+                    <option value="queue_based">Links from Pages Only</option>
+                    <option value="sitemap_only">Sitemap Only</option>
+                    <option value="queue_and_sitemap">Queue + Sitemap (Recommended)</option>
+                    <option value="url_list">URL List (CSV/Excel Upload)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="save_options">Save Options</label>
+                <select id="save_options" name="save_options" onchange="onSaveOptionsChange(this.value)">
+                    <option value="full_mirror">Full Website Mirror</option>
+                    <option value="html_content_only">HTML Content Only (AI Training)</option>
+                    <option value="pattern_crawl">Pattern Crawl (Specific Paths Only)</option>
+                </select>
+            </div>
+
+            <div class="form-group checkbox">
+                <label>
+                    <input type="checkbox" id="fast_mode" name="fast_mode">
+                    <strong>Fast Mode &#x26A1;</strong> (For HTML-only: ~100&#8211;300&nbsp;ms/page and for full-site: ~1&#8211;3&nbsp;s/page)
+                </label>
+                <small style="display:block; color:#64748b; margin-top:4px; font-size:0.8rem;">
+                    Skips the long <code>networkidle</code> wait, caps navigation timeouts, and (in HTML-only mode)
+                    blocks images, fonts, stylesheets &amp; media so only HTML is fetched. Recommended for static
+                    or content-heavy sites; disable if the site relies on slow client-side rendering.
+                </small>
+            </div>
+        </fieldset>
+
+
+        <fieldset id="assets_fieldset">
+            <legend>Assets to Download</legend>
+            <div class="checkbox-group">
+                <label class="checkbox"><input type="checkbox" name="save_images" checked> Images</label>
+                <label class="checkbox"><input type="checkbox" name="save_videos" checked> Videos</label>
+                <label class="checkbox"><input type="checkbox" name="save_pdfs" checked> PDFs</label>
+                <label class="checkbox"><input type="checkbox" name="save_css" checked> CSS</label>
+                <label class="checkbox"><input type="checkbox" name="save_js" checked> JS</label>
+                <label class="checkbox"><input type="checkbox" name="save_icons" checked> Icons</label>
+                <label class="checkbox"><input type="checkbox" name="save_fonts" checked> Fonts</label>
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Timeouts (milliseconds)</legend>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="timeout_for_htmls">HTML Timeout</label>
+                    <input type="number" id="timeout_for_htmls" name="timeout_for_htmls" value="30000" min="1000" step="1000">
+                </div>
+                <div class="form-group">
+                    <label for="timeout_for_assets">Asset Timeout</label>
+                    <input type="number" id="timeout_for_assets" name="timeout_for_assets" value="60000" min="1000" step="1000">
+                </div>
+            </div>
+        </fieldset>
+
+        <fieldset id="sitemap_fieldset">
+            <legend>Sitemap & URL Sources</legend>
+            
+            <div class="form-group" id="sitemap_url_group">
+                <label for="sitemap_urls">Sitemap URLs (comma-separated)</label>
+                <input type="text" id="sitemap_urls" name="sitemap_urls" placeholder="https://example.com/sitemap.xml">
+                <small style="color:#64748b; margin-top:4px; display:block;">
+                    Required for SITEMAP_ONLY mode unless uploading a URL file below
+                </small>
+            </div>
+            
+            <div class="form-group" id="orphan_urls_group">
+                <label for="orphan_urls">Orphan URLs (comma-separated)</label>
+                <input type="text" id="orphan_urls" name="orphan_urls" placeholder="https://example.com/hidden-page">
+                
+                <div style="margin-top: 0.75rem; padding: 0.75rem; background: #f8fafc; border-radius: 6px;">
+                    <label style="font-size: 0.85rem; font-weight: 500; margin-bottom: 0.5rem; display: block;">Or Upload Orphan URL File</label>
+                    <div class="upload-zone" id="orphan_upload_zone" style="min-height: 80px; padding: 0.75rem;">
+                        <div class="upload-zone-content" style="font-size: 0.85rem;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:#94a3b8; margin-bottom: 0.25rem;">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            <p style="margin:0; font-weight:500;">Drop orphan URL file here</p>
+                            <p style="font-size:0.75rem; color:#94a3b8; margin:0;">.csv, .xlsx</p>
+                        </div>
+                        <input type="file" id="orphan_file_input" accept=".csv,.xlsx,.xls" style="display:none;">
+                    </div>
+                    <div id="orphan_upload_status" style="display:none; margin-top:0.5rem; font-size: 0.8rem;"></div>
+                    <input type="hidden" name="upload_orphan_urls" id="upload_orphan_urls_hidden" value="">
+                </div>
+            </div>
+            
+            <div class="form-group" id="sitemap_upload_group">
+                <label>Upload URL List or Sitemap File</label>
+                <div class="upload-zone" id="sitemap_upload_zone">
+                    <div class="upload-zone-content">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:#94a3b8;">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <p style="margin:0.5rem 0 0.25rem; font-weight:500;">Drag &amp; drop your file here</p>
+                        <p style="font-size:0.8rem; color:#94a3b8;">or click to browse · .csv, .xlsx, .xml</p>
+                    </div>
+                    <input type="file" id="sitemap_file_input" accept=".csv,.xlsx,.xls,.xml" style="display:none;">
+                </div>
+                <div id="sitemap_upload_status" style="display:none; margin-top:1rem;"></div>
+                <small style="color:#64748b; margin-top:4px; display:block;">
+                    Upload a CSV/Excel with URLs, or an XML sitemap file
+                </small>
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Authentication (Optional)</legend>
+
+            <small style="display:block; color:#64748b; margin-bottom:1rem; font-size:0.8rem; line-height:1.5;">
+                When Login URL, Username, and Password are set, the crawler opens a
+                <strong>visible browser window</strong>, auto-fills credentials, and clicks submit.
+                If MFA / 2FA is triggered, you can complete it manually in the browser.
+                The crawler auto-detects when auth finishes and begins crawling.
+                If auth redirects to a different domain, it is automatically added to the crawl scope.
+            </small>
+            
+            <div class="form-group">
+                <label for="auth_login_url">Login URL</label>
+                <input type="url" id="auth_login_url" name="auth_login_url" placeholder="https://example.com/login" onchange="onAuthFieldsChange()">
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="auth_username">Username</label>
+                    <input type="text" id="auth_username" name="auth_username" placeholder="user@example.com" onchange="onAuthFieldsChange()">
+                </div>
+                
+                <div class="form-group">
+                    <label for="auth_password">Password</label>
+                    <input type="password" id="auth_password" name="auth_password" placeholder="••••••••" onchange="onAuthFieldsChange()">
+                </div>
+            </div>
+
+            <!-- Hidden field to keep backward compatibility with backend -->
+            <input type="hidden" id="auth_interactive" name="auth_interactive" value="">
+
+            <div id="auth_extra_options" style="display:none;">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="auth_wait_seconds">MFA Wait Time (seconds)</label>
+                        <input type="number" id="auth_wait_seconds" name="auth_wait_seconds" value="120" min="10" max="600">
+                        <small style="color:#64748b; margin-top:4px; display:block;">
+                            Max time to wait for you to complete MFA before timing out (default: 120s)
+                        </small>
+                    </div>
+                    <div class="form-group">
+                        <label for="auth_post_login_url">Post-Login Entry URL (Optional)</label>
+                        <input type="url" id="auth_post_login_url" name="auth_post_login_url" placeholder="https://example.com/dashboard">
+                        <small style="color:#64748b; margin-top:4px; display:block;">
+                            URL to start crawling after auth. Auto-detected if empty.
+                        </small>
+                    </div>
+                </div>
+
+                <div style="margin-top: 0.75rem; padding: 0.75rem; background: #f8fafc; border-radius: 6px;">
+                    <label style="font-size: 0.85rem; font-weight: 500; margin-bottom: 0.5rem; display: block;">
+                        Custom Selectors (Advanced — only if auto-detection fails)
+                    </label>
+                    <small style="display:block; color:#64748b; margin-bottom:0.5rem; font-size:0.8rem;">
+                        CSS selectors to override auto-detection. Use browser DevTools to find the right selector.
+                    </small>
+                    <div class="form-group" style="margin-bottom:0.5rem;">
+                        <input type="text" name="auth_trigger_selector" placeholder="e.g. button:has-text('Sign In')" style="font-size:0.85rem;">
+                        <small style="color:#94a3b8;">Modal trigger — button that opens a login popup (leave empty if login is a full page)</small>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0.5rem;">
+                        <input type="text" name="auth_username_selector" placeholder="e.g. input#my-username-field" style="font-size:0.85rem;">
+                        <small style="color:#94a3b8;">Username selector</small>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0.5rem;">
+                        <input type="text" name="auth_password_selector" placeholder="e.g. input#my-password-field" style="font-size:0.85rem;">
+                        <small style="color:#94a3b8;">Password selector</small>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <input type="text" name="auth_submit_selector" placeholder="e.g. button#login-btn" style="font-size:0.85rem;">
+                        <small style="color:#94a3b8;">Submit button selector</small>
+                    </div>
+                </div>
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Domain Verification (Optional)</legend>
+            
+            <div class="form-group checkbox">
+                <label>
+                    <input type="checkbox" name="verify_domain">
+                    Verify Domain Ownership
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label for="verification_email">Verification Email</label>
+                <input type="email" id="verification_email" name="verification_email" placeholder="admin@example.com">
+            </div>
+            
+            <div class="form-group">
+                <label for="verification_token">Verification Token</label>
+                <input type="text" id="verification_token" name="verification_token" placeholder="your-token-here">
+            </div>
+        </fieldset>
+
+        <input type="hidden" name="upload_urls" id="upload_urls_hidden" value="">
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Start Crawl</button>
+        </div>
+    </form>
+
+    <script>
+
+    /* ---- Crawl-mode toggle (conditional field visibility) ---- */
+    function onCrawlModeChange(value) {
+        var entryUrlGroup = document.getElementById('entry_url_group');
+        var entryUrlHint = document.getElementById('entry_url_hint');
+        var depthPagesRow = document.getElementById('depth_pages_row');
+        var sitemapUrlGroup = document.getElementById('sitemap_url_group');
+        var orphanGroup = document.getElementById('orphan_urls_group');
+        var sitemapUploadGroup = document.getElementById('sitemap_upload_group');
+        
+        // Helper functions - form-row uses CSS flex, so use '' to revert to default
+        function showBlock(el) { if (el) el.style.display = 'block'; }
+        function showDefault(el) { if (el) el.style.display = ''; }  // Revert to CSS default (flex for form-row)
+        function hide(el) { if (el) el.style.display = 'none'; }
+        
+        // URL_LIST mode: hide max_depth/max_pages and sitemap, show orphan and upload
+        if (value === 'url_list') {
+            hide(depthPagesRow);
+            showBlock(entryUrlGroup);
+            hide(entryUrlHint);
+            hide(sitemapUrlGroup);
+            showBlock(orphanGroup);
+            showBlock(sitemapUploadGroup);
+        }
+        // SITEMAP_ONLY mode: hide entry_url and orphan, show sitemap inputs and upload
+        else if (value === 'sitemap_only') {
+            hide(entryUrlGroup);
+            showDefault(depthPagesRow);  // Use CSS default (flex)
+            showBlock(sitemapUrlGroup);
+            hide(orphanGroup);
+            showBlock(sitemapUploadGroup);
+        }
+        // QUEUE_AND_SITEMAP or QUEUE_BASED: show entry, depth, sitemap, orphan; hide upload
+        else {
+            showBlock(entryUrlGroup);
+            hide(entryUrlHint);
+            showDefault(depthPagesRow);  // Use CSS default (flex)
+            showBlock(sitemapUrlGroup);
+            showBlock(orphanGroup);
+            hide(sitemapUploadGroup);
+        }
+    }
+    
+    /* ---- Save-options toggle (hide assets for HTML-only) ---- */
+    function onSaveOptionsChange(value) {
+        var hint = document.getElementById('include_patterns_hint');
+        var label = document.getElementById('include_patterns_label');
+        var input = document.getElementById('include_patterns');
+        var assetsFieldset = document.getElementById('assets_fieldset');
+
+        if (value === 'pattern_crawl') {
+            hint.style.display = 'block';
+            label.style.color = '#e67e22';
+            label.textContent = 'Include Paths * (required for Pattern Crawl)';
+            input.placeholder = '/careers, /newsletter/something';
+            input.style.borderColor = '#e67e22';
+            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            input.focus();
+        } else {
+            hint.style.display = 'none';
+            label.style.color = '';
+            label.textContent = 'Include Patterns (comma-separated)';
+            input.placeholder = '/blog/, /products/';
+            input.style.borderColor = '';
+        }
+        
+        // Hide assets fieldset for HTML_CONTENT_ONLY mode
+        if (value === 'html_content_only') {
+            assetsFieldset.style.display = 'none';
+        } else {
+            assetsFieldset.style.display = '';  // Revert to CSS default
+        }
+    }
+
+    /* ---- Auth fields toggle (show extra options when all 3 auth fields are filled) ---- */
+    function onAuthFieldsChange() {
+        var loginUrl = document.getElementById('auth_login_url').value.trim();
+        var username = document.getElementById('auth_username').value.trim();
+        var password = document.getElementById('auth_password').value.trim();
+        var opts = document.getElementById('auth_extra_options');
+        if (opts) opts.style.display = (loginUrl && username && password) ? '' : 'none';
+    }
+
+    /* ---- Sitemap file upload logic ---- */
+    var sitemapUploadZone = document.getElementById('sitemap_upload_zone');
+    var sitemapFileInput = document.getElementById('sitemap_file_input');
+
+    sitemapUploadZone.addEventListener('click', function() { sitemapFileInput.click(); });
+
+    sitemapUploadZone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        sitemapUploadZone.classList.add('drag-over');
+    });
+    sitemapUploadZone.addEventListener('dragleave', function() {
+        sitemapUploadZone.classList.remove('drag-over');
+    });
+    sitemapUploadZone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        sitemapUploadZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length) {
+            sitemapFileInput.files = e.dataTransfer.files;
+            handleSitemapFileUpload(e.dataTransfer.files[0]);
+        }
+    });
+
+    sitemapFileInput.addEventListener('change', function() {
+        if (sitemapFileInput.files.length) handleSitemapFileUpload(sitemapFileInput.files[0]);
+    });
+
+    function handleSitemapFileUpload(file) {
+        var status = document.getElementById('sitemap_upload_status');
+        status.style.display = 'block';
+        status.innerHTML = '<span style="color:#2563eb;">⏳ Parsing <strong>' + file.name + '</strong>…</span>';
+
+        var formData = new FormData();
+        formData.append('file', file);
+
+        fetch('/upload-url-list', { method: 'POST', body: formData })
+            .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+            .then(function(result) {
+                if (!result.ok) {
+                    status.innerHTML = '<span style="color:#ef4444;">❌ ' + (result.data.error || 'Upload failed') + '</span>';
+                    return;
+                }
+                var urls = result.data.urls;
+                status.innerHTML = '<span style="color:#22c55e;">✅ Found <strong>' + urls.length + '</strong> URLs (column: <code>' + result.data.column_used + '</code>)</span>';
+
+                // Store in hidden input
+                document.getElementById('upload_urls_hidden').value = JSON.stringify(urls);
+            })
+            .catch(function(err) {
+                status.innerHTML = '<span style="color:#ef4444;">❌ Network error: ' + err + '</span>';
+            });
+    }
+    
+    /* ---- Orphan URL file upload logic ---- */
+    var orphanUploadZone = document.getElementById('orphan_upload_zone');
+    var orphanFileInput = document.getElementById('orphan_file_input');
+
+    orphanUploadZone.addEventListener('click', function() { orphanFileInput.click(); });
+
+    orphanUploadZone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        orphanUploadZone.classList.add('drag-over');
+    });
+    orphanUploadZone.addEventListener('dragleave', function() {
+        orphanUploadZone.classList.remove('drag-over');
+    });
+    orphanUploadZone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        orphanUploadZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length) {
+            orphanFileInput.files = e.dataTransfer.files;
+            handleOrphanFileUpload(e.dataTransfer.files[0]);
+        }
+    });
+
+    orphanFileInput.addEventListener('change', function() {
+        if (orphanFileInput.files.length) handleOrphanFileUpload(orphanFileInput.files[0]);
+    });
+
+    function handleOrphanFileUpload(file) {
+        var status = document.getElementById('orphan_upload_status');
+        status.style.display = 'block';
+        status.innerHTML = '<span style="color:#2563eb;">⏳ Parsing <strong>' + file.name + '</strong>…</span>';
+
+        var formData = new FormData();
+        formData.append('file', file);
+
+        fetch('/upload-url-list', { method: 'POST', body: formData })
+            .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+            .then(function(result) {
+                if (!result.ok) {
+                    status.innerHTML = '<span style="color:#ef4444;">❌ ' + (result.data.error || 'Upload failed') + '</span>';
+                    return;
+                }
+                var urls = result.data.urls;
+                status.innerHTML = '<span style="color:#22c55e;">✅ Found <strong>' + urls.length + '</strong> orphan URLs</span>';
+
+                // Store in hidden input
+                document.getElementById('upload_orphan_urls_hidden').value = JSON.stringify(urls);
+            })
+            .catch(function(err) {
+                status.innerHTML = '<span style="color:#ef4444;">❌ Network error: ' + err + '</span>';
+            });
+    }
+    
+    /* ---- Form validation ---- */
+    document.querySelector('form.crawl-form').addEventListener('submit', function(e) {
+        var crawlMode = document.getElementById('crawl_mode').value;
+        var sitemapUrls = document.getElementById('sitemap_urls').value.trim();
+        var uploadUrls = document.getElementById('upload_urls_hidden').value;
+        
+        if (crawlMode === 'sitemap_only') {
+            var hasSitemap = sitemapUrls.length > 0;
+            var hasUpload = uploadUrls && uploadUrls !== '[]';
+            
+            if (!hasSitemap && !hasUpload) {
+                e.preventDefault();
+                alert('SITEMAP_ONLY mode requires either a sitemap URL or an uploaded URL file');
+                return false;
+            }
+        }
+    });
+
+    function escapeHtml(text) {
+        var d = document.createElement('div');
+        d.textContent = text;
+        return d.innerHTML;
+    }
+    
+    // Initialize conditional display on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        onCrawlModeChange(document.getElementById('crawl_mode').value);
+        onSaveOptionsChange(document.getElementById('save_options').value);
+        onAuthFieldsChange();
+    });
+
+    /* ---- Live capacity polling ---- */
+    setInterval(function() {
+        fetch('/api/capacity')
+            .then(function(res) { return res.json(); })
+            .then(function(cap) {
+                var slotsHtml = '';
+                for (var i = 0; i < cap.max; i++) {
+                    var active = i < cap.running;
+                    slotsHtml += '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;'
+                        + 'background:' + (active ? '#22c55e' : '#e2e8f0') + ';'
+                        + 'border:1px solid ' + (active ? '#16a34a' : '#cbd5e1') + ';"></span>';
+                }
+                document.getElementById('capacity-slots').innerHTML = slotsHtml;
+
+                var text = cap.running + '/' + cap.max + ' in use';
+                if (cap.running_domains && cap.running_domains.length > 0) {
+                    text += ' (' + cap.running_domains.join(', ') + ')';
+                }
+                document.getElementById('capacity-text').textContent = text;
+
+                var bar = document.getElementById('capacity-bar');
+                if (cap.available === 0) {
+                    bar.style.background = '#fef2f2';
+                    bar.style.borderColor = '#fecaca';
+                } else {
+                    bar.style.background = '#f0f9ff';
+                    bar.style.borderColor = '#bae6fd';
+                }
+            })
+            .catch(function() {});
+    }, 5000);
+    </script>
+
+    {% if recent_jobs %}
+    <div class="recent-jobs-section">
+        <div class="section-header">
+            <h3>Recent Crawls (Last 10)</h3>
+            <a href="/jobs" class="btn btn-primary">View All Crawls →</a>
+        </div>
+
+        <div class="table-responsive">
+            <table class="jobs-table">
+                <thead>
+                <tr>
+                    <th>Job ID</th>
+                    <th>Domain</th>
+                    <th>Status</th>
+                    <th>Stage</th>
+                    <th>Pages</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in recent_jobs[:10] %}
+                <tr>
+                    <td data-label="Job ID"><a href="/job/{{ job.job_id }}">{{ job.job_id }}</a></td>
+                    <td data-label="Domain">
+                        <a href="/jobs?domain={{ job.domain }}" class="domain-link" title="Filter by this domain">{{ job.domain }}</a>
+                    </td>
+                    <td data-label="Status"><span class="status status-{{ job.status.value }}">{{ job.status.value }}</span></td>
+                    <td data-label="Stage">{{ job.stage.value }}</td>
+                    <td data-label="Pages">{{ job.pages_crawled }}</td>
+                    <td data-label="Created">{{ job.created_at.strftime('%Y-%m-%d %H:%M') if job.created_at else '-' }}</td>
+                    <td data-label="Actions">
+                        <a href="/job/{{ job.job_id }}" class="btn btn-small">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        </div>
+
+        <div class="quick-search">
+            <h4>Quick Filters</h4>
+            <div class="search-links">
+                <span>By Month:</span>
+                {% set months = [] %}
+                {% for job in recent_jobs %}
+                    {% if job.created_at %}
+                        {% set month_key = job.created_at.strftime('%Y-%m') %}
+                        {% set month_label = job.created_at.strftime('%B %Y') %}
+                        {% if month_key not in months %}
+                            {% set _ = months.append(month_key) %}
+                            <a href="/jobs?month={{ month_key }}" class="btn btn-small">{{ month_label }}</a>
+                        {% endif %}
+                    {% endif %}
+                {% endfor %}
+                <span style="margin-left: 1rem;">|</span>
+                <a href="/jobs" class="btn btn-small btn-primary">Advanced Search & Pagination →</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

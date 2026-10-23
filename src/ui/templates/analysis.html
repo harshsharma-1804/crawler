@@ -1,0 +1,86 @@
+{% extends "layout.html" %}
+
+{% block title %}Analysis: {{ job.domain }} - V3 Crawler{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1400px;">
+    <div class="section-header" style="margin-bottom: var(--space-lg);">
+        <h2>Analysis Data: {{ job.domain }}</h2>
+        <div class="btn-group">
+            <a href="/api/sync/job/{{ job.job_id }}/analysis/{{ current_file }}" target="_blank" class="btn btn-success">Download {{ current_file }}</a>
+            <a href="/job/{{ job.job_id }}" class="btn btn-secondary">Back to Job</a>
+        </div>
+    </div>
+    
+    <!-- File Navigation Tabs -->
+    <div style="margin-bottom: 2rem; border-bottom: 1px solid #e2e8f0; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+        {% for file in available_files %}
+        {% set is_active = (file == current_file) %}
+        {% set border_color = '#2563eb' if is_active else 'transparent' %}
+        {% set text_color = '#2563eb' if is_active else '#64748b' %}
+        {% set font_weight = 'bold' if is_active else 'normal' %}
+        <a href="?file={{ file }}" style="padding: 10px 16px; text-decoration: none; border-bottom: 2px solid {{ border_color }}; color: {{ text_color }}; font-weight: {{ font_weight }};">
+            {{ file }}
+        </a>
+        {% endfor %}
+    </div>
+    
+    {% if not available_files %}
+    <div class="alert alert-warning">No analysis files found. The crawler may not have generated any reports yet, or analysis is still in progress.</div>
+    {% elif error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% elif not rows %}
+    <div class="alert alert-info">The file exists but contains no data yet. Data will appear as the crawler progresses.</div>
+    {% else %}
+    
+    <div class="analysis-stats" style="display: flex; gap: 1rem; margin-bottom: 2rem;">
+        <div style="background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px solid #e2e8f0; flex: 1;">
+            <div style="font-size: 0.875rem; color: #64748b; text-transform: uppercase;">Total Records</div>
+            <div style="font-size: 1.5rem; font-weight: bold; color: #0f172a;">{{ rows|length }}</div>
+        </div>
+    </div>
+
+    <div style="overflow-x: auto; background: white; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+            <thead>
+                <tr style="background: #f1f5f9; text-align: left; border-bottom: 2px solid #cbd5e1;">
+                    {% for header in headers %}
+                    <th style="padding: 12px 16px; font-weight: 600; color: #334155; white-space: nowrap;">{{ header|title }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    {% for header in headers %}
+                        {% set cell = row[header] %}
+                        
+                        {% if header == 'url' or header == 'source_url' or header == 'action_url' %}
+                        <td style="padding: 12px 16px; max-width: 300px; word-wrap: break-word;">
+                            {% if cell.startswith('http') %}
+                            <a href="{{ cell }}" target="_blank" style="color: #2563eb; text-decoration: none;">{{ cell }}</a>
+                            {% else %}
+                            {{ cell }}
+                            {% endif %}
+                        </td>
+                        {% elif header == 'link_type' or header == 'asset_type' or header == 'file_type' %}
+                        <td style="padding: 12px 16px;">
+                            <span style="padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; 
+                                background: #e0f2fe; color: #075985; font-weight: bold; text-transform: uppercase;">
+                                {{ cell }}
+                            </span>
+                        </td>
+                        {% else %}
+                        <td style="padding: 12px 16px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ cell }}">
+                            {{ cell }}
+                        </td>
+                        {% endif %}
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

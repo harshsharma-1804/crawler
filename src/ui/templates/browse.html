@@ -1,0 +1,268 @@
+{% extends "layout.html" %}
+
+{% block title %}Browse {{ job.domain }} - V3 Crawler{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2>Browse &amp; Download</h2>
+    <p class="text-muted">
+        Job <code>{{ job.job_id }}</code> &middot;
+        Domain <strong>{{ job.domain }}</strong>
+    </p>
+
+    <div class="tab-bar" style="margin: var(--space-md) 0; border-bottom: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: var(--space-xs); align-items: center;">
+        <button class="tab-btn active" data-kind="htmls"
+                style="padding: var(--space-sm) var(--space-md); border: none; background: transparent; border-bottom: 3px solid var(--primary-color); font-weight: 600; cursor: pointer; color: var(--text-color);">
+            HTML Folder
+        </button>
+        <button class="tab-btn" data-kind="assets"
+                style="padding: var(--space-sm) var(--space-md); border: none; background: transparent; border-bottom: 3px solid transparent; cursor: pointer; color: var(--text-muted);">
+            Assets Folder
+        </button>
+        <span style="margin-left: auto; padding-top: var(--space-sm);">
+            <a id="download-root" class="btn btn-primary" href="#" style="font-size: 0.9em;">Download folder</a>
+        </span>
+    </div>
+
+    <div id="tree-root" class="tree" style="font-family: system-ui, sans-serif; font-size: 0.95em;"></div>
+
+    <div class="back-link" style="margin-top: 2rem;">
+        <a href="/job/{{ job.job_id }}" class="btn">&larr; Back to Job</a>
+        <a href="/jobs" class="btn">All Jobs &rarr;</a>
+    </div>
+</div>
+
+<style>
+    .tree .node { padding: 2px 0; }
+    .tree .folder > .row,
+    .tree .file > .row {
+        display: flex; align-items: center; gap: 6px;
+        padding: 4px 6px; border-radius: 4px;
+    }
+    .tree .folder > .row:hover { background: #f1f5f9; }
+    .tree .toggle {
+        display: inline-block; width: 14px; text-align: center;
+        color: #64748b; cursor: pointer; user-select: none; font-weight: bold;
+    }
+    .tree .toggle.empty { visibility: hidden; }
+    .tree .icon { width: 16px; display: inline-block; text-align: center; }
+    .tree .name { flex: 1; }
+    .tree .folder > .row .name { font-weight: 500; }
+    .tree .meta { color: #64748b; font-size: 0.85em; }
+    .tree .dl-btn {
+        padding: 2px 10px; font-size: 0.8em;
+        background: #2563eb; color: white; border: none;
+        border-radius: 4px; cursor: pointer; text-decoration: none;
+    }
+    .tree .dl-btn:hover { background: #1d4ed8; }
+    .tree .children { margin-left: 20px; border-left: 1px dashed #cbd5e1; padding-left: 10px; }
+    .tree .loading, .tree .empty-msg, .tree .error-msg {
+        color: #64748b; font-style: italic; padding: 4px 0;
+    }
+    .tree .error-msg { color: #dc2626; font-style: normal; }
+    .tab-btn { color: #64748b; }
+    .tab-btn.active { color: #1e293b; }
+</style>
+
+<script>
+(() => {
+    const JOB_ID = "{{ job.job_id }}";
+    const root = document.getElementById("tree-root");
+    const downloadRootLink = document.getElementById("download-root");
+    let currentKind = "htmls";
+    const downloadIcon = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>`;
+
+    function fmtBytes(n) {
+        if (!n) return "0 B";
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let i = 0; let v = n;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+        return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+    }
+
+    function browseUrl(kind, path) {
+        return path
+            ? `/api/sync/job/${JOB_ID}/browse/${kind}/${path.split("/").map(encodeURIComponent).join("/")}`
+            : `/api/sync/job/${JOB_ID}/browse/${kind}`;
+    }
+    function downloadUrl(kind, path) {
+        return path
+            ? `/api/sync/job/${JOB_ID}/download/${kind}/${path.split("/").map(encodeURIComponent).join("/")}`
+            : `/api/sync/job/${JOB_ID}/download/${kind}`;
+    }
+
+    async function fetchLevel(kind, path) {
+        const res = await fetch(browseUrl(kind, path));
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${res.status}`);
+        }
+        return res.json();
+    }
+
+    function renderFolder(kind, folder, container) {
+        const node = document.createElement("div");
+        node.className = "node folder";
+
+        const row = document.createElement("div");
+        row.className = "row";
+
+        const toggle = document.createElement("span");
+        toggle.className = "toggle";
+        toggle.textContent = "+";
+        row.appendChild(toggle);
+
+        const icon = document.createElement("span");
+        icon.className = "icon";
+        icon.textContent = "\uD83D\uDCC1"; // folder
+        row.appendChild(icon);
+
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = folder.name;
+        row.appendChild(name);
+
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = `${folder.file_count} files · ${fmtBytes(folder.total_size)}`;
+        row.appendChild(meta);
+
+        const dl = document.createElement("a");
+        dl.className = "dl-btn";
+        // dl.textContent = "↓ ZIP"; 
+        dl.innerHTML = downloadIcon + " Zip";
+        dl.style.display = "inline-flex";
+        dl.style.gap = "4px";
+        dl.style.alignItems = "center";
+        dl.href = downloadUrl(kind, folder.path);
+        dl.setAttribute("download", "");
+        dl.addEventListener("click", (e) => e.stopPropagation());
+        row.appendChild(dl);
+
+        const children = document.createElement("div");
+        children.className = "children";
+        children.style.display = "none";
+
+        let loaded = false;
+        async function expand() {
+            if (loaded) {
+                children.style.display = children.style.display === "none" ? "block" : "none";
+                toggle.textContent = children.style.display === "none" ? "+" : "−";
+                return;
+            }
+            toggle.textContent = "−";
+            children.style.display = "block";
+            children.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const data = await fetchLevel(kind, folder.path);
+                loaded = true;
+                children.innerHTML = "";
+                if (!data.folders.length && !data.files.length) {
+                    children.innerHTML = '<div class="empty-msg">(empty)</div>';
+                    return;
+                }
+                data.folders.forEach((f) => renderFolder(kind, f, children));
+                data.files.forEach((f) => renderFile(kind, f, children));
+            } catch (err) {
+                children.innerHTML = `<div class="error-msg">Failed: ${err.message}</div>`;
+            }
+        }
+
+        row.addEventListener("click", (e) => {
+            if (e.target === dl) return;
+            expand();
+        });
+        toggle.addEventListener("click", (e) => { e.stopPropagation(); expand(); });
+
+        node.appendChild(row);
+        node.appendChild(children);
+        container.appendChild(node);
+    }
+
+    function renderFile(kind, file, container) {
+        const node = document.createElement("div");
+        node.className = "node file";
+        const row = document.createElement("div");
+        row.className = "row";
+
+        const toggle = document.createElement("span");
+        toggle.className = "toggle empty";
+        toggle.textContent = "·";
+        row.appendChild(toggle);
+
+        const icon = document.createElement("span");
+        icon.className = "icon";
+        icon.textContent = "\uD83D\uDCC4"; // file
+        row.appendChild(icon);
+
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = file.name;
+        row.appendChild(name);
+
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = fmtBytes(file.size);
+        row.appendChild(meta);
+
+        const dl = document.createElement("a");
+        dl.className = "dl-btn";
+        // dl.textContent = "↓";
+        dl.innerHTML = downloadIcon;
+        dl.style.display = "inline-flex";
+        dl.style.alignItems = "center";
+        dl.style.justifyContent = "center";
+        dl.href = downloadUrl(kind, file.path);
+        dl.setAttribute("download", file.name);
+        dl.addEventListener("click", (e) => e.stopPropagation());
+        row.appendChild(dl);
+
+        node.appendChild(row);
+        container.appendChild(node);
+    }
+
+    async function loadRoot(kind) {
+        currentKind = kind;
+        downloadRootLink.href = downloadUrl(kind, "");
+        downloadRootLink.textContent =
+            kind === "htmls" ? "Download whole HTML folder" : "Download whole Assets folder";
+        root.innerHTML = '<div class="loading">Loading…</div>';
+        try {
+            const data = await fetchLevel(kind, "");
+            root.innerHTML = "";
+            if (!data.folders.length && !data.files.length) {
+                root.innerHTML = '<div class="empty-msg">This folder is empty.</div>';
+                return;
+            }
+            data.folders.forEach((f) => renderFolder(kind, f, root));
+            data.files.forEach((f) => renderFile(kind, f, root));
+        } catch (err) {
+            root.innerHTML = `<div class="error-msg">Failed to load: ${err.message}</div>`;
+        }
+    }
+
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".tab-btn").forEach((b) => {
+                b.classList.remove("active");
+                b.style.borderBottomColor = "transparent";
+                b.style.fontWeight = "normal";
+            });
+            btn.classList.add("active");
+            btn.style.borderBottomColor = "#2563eb";
+            btn.style.fontWeight = "600";
+            loadRoot(btn.dataset.kind);
+        });
+    });
+
+    loadRoot("htmls");
+})();
+</script>
+{% endblock %}

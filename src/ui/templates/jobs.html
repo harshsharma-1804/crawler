@@ -1,0 +1,168 @@
+{% extends "layout.html" %}
+
+{% block title %}All Crawl Jobs - V3 Crawler{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2>All Crawl Jobs</h2>
+
+    <!-- Search and Filter Form -->
+    <div class="filter-section">
+        <form action="/jobs" method="get" class="filter-form">
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label for="domain">Search Domain</label>
+                    <input type="text" id="domain" name="domain" value="{{ domain }}" placeholder="e.g., example.com">
+                </div>
+
+                <div class="filter-group">
+                    <label for="month">Month</label>
+                    <select id="month" name="month">
+                        <option value="">All Months</option>
+                        {% for month_key, month_label in available_months %}
+                        <option value="{{ month_key }}" {% if month == month_key %}selected{% endif %}>{{ month_label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label for="status">Status</label>
+                    <select id="status" name="status">
+                        <option value="">All Status</option>
+                        <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
+                        <option value="running" {% if status == 'running' %}selected{% endif %}>Running</option>
+                        <option value="paused" {% if status == 'paused' %}selected{% endif %}>Paused</option>
+                        <option value="completed" {% if status == 'completed' %}selected{% endif %}>Completed</option>
+                        <option value="failed" {% if status == 'failed' %}selected{% endif %}>Failed</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label for="per_page">Per Page</label>
+                    <select id="per_page" name="per_page">
+                        <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
+                        <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+                        <option value="75" {% if per_page == 75 %}selected{% endif %}>75</option>
+                        <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+                    </select>
+                </div>
+
+                <div class="filter-actions">
+                    <button type="submit" class="btn">Filter</button>
+                    <a href="/jobs" class="btn btn-secondary">Clear</a>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Results Info -->
+    <div class="results-info">
+        <p>Showing {{ jobs | length }} of {{ total }} jobs (Page {{ page }} of {{ total_pages }})</p>
+    </div>
+
+    {% if jobs %}
+    <div class="table-responsive">
+        <table class="jobs-table">
+            <thead>
+            <tr>
+                <th>Job ID</th>
+                <th>Domain</th>
+                <th>Status</th>
+                <th>Stage</th>
+                <th>Pages</th>
+                <th>Assets</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr>
+                <td data-label="Job ID"><a href="/job/{{ job.job_id }}">{{ job.job_id }}</a></td>
+                <td data-label="Domain">
+                    <a href="/jobs?domain={{ job.domain }}" class="domain-link">{{ job.domain }}</a>
+                </td>
+                <td data-label="Status"><span class="status status-{{ job.status.value }}">{{ job.status.value }}</span></td>
+                <td data-label="Stage">{{ job.stage.value }}</td>
+                <td data-label="Pages">{{ job.pages_crawled }}</td>
+                <td data-label="Assets">{{ job.assets_downloaded }}</td>
+                <td data-label="Created">{{ job.created_at.strftime('%Y-%m-%d %H:%M') if job.created_at else '-' }}</td>
+                <td data-label="Actions">
+                    <a href="/job/{{ job.job_id }}" class="btn btn-small">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="/jobs?page={{ page - 1 }}&per_page={{ per_page }}&domain={{ domain }}&month={{ month }}&status={{ status }}" class="btn btn-small">← Previous</a>
+        {% endif %}
+
+        <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+
+        {% if page < total_pages %}
+        <a href="/jobs?page={{ page + 1 }}&per_page={{ per_page }}&domain={{ domain }}&month={{ month }}&status={{ status }}" class="btn btn-small">Next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="alert alert-info">
+        No jobs found. <a href="/">Start a new crawl</a>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+// Auto-refresh for running jobs
+{% if jobs %}
+{% set has_running = namespace(value=false) %}
+{% for job in jobs %}
+    {% if job.status.value in ['pending', 'running'] %}
+        {% set has_running.value = true %}
+    {% endif %}
+{% endfor %}
+{% if has_running.value %}
+setInterval(async () => {
+    try {
+        // Check if any job is still running
+        const res = await fetch('/api/jobs?page={{ page }}&per_page={{ per_page }}');
+        const data = await res.json();
+        if (data.jobs) {
+            const hasRunning = data.jobs.some(j => j.status === 'running' || j.status === 'pending');
+            const hasChanges = data.jobs.some((newJob, idx) => {
+                const oldJob = document.querySelector(`a[href="/job/${newJob.job_id}"]`);
+                if (!oldJob) return true;
+                const row = oldJob.closest('tr');
+                if (!row) return true;
+                const statusCell = row.querySelector('td[data-label="Status"] span');
+                const pagesCell = row.querySelector('td[data-label="Pages"]');
+                const assetsCell = row.querySelector('td[data-label="Assets"]');
+                const stageCell = row.querySelector('td[data-label="Stage"]');
+                
+                return statusCell && statusCell.textContent !== newJob.status ||
+                       pagesCell && pagesCell.textContent !== String(newJob.pages_crawled) ||
+                       assetsCell && assetsCell.textContent !== String(newJob.assets_downloaded) ||
+                       stageCell && stageCell.textContent !== newJob.stage;
+            });
+            
+            if (hasChanges) {
+                window.location.reload();
+            } else if (!hasRunning) {
+                // No more running jobs, stop polling
+                clearInterval(this);
+            }
+        }
+    } catch (e) {
+        console.error("Jobs poll failed", e);
+    }
+}, 3000);
+{% endif %}
+{% endif %}
+</script>
+{% endblock %}
